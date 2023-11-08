@@ -8,7 +8,6 @@ pd.set_option('display.max_columns', 500)
 pd.set_option('display.width', 1000)
 from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler, MinMaxScaler
-from mpl_toolkits.mplot3d import Axes3D
 from sklearn.model_selection import train_test_split, \
                                     StratifiedKFold
 
@@ -47,9 +46,56 @@ def draw_missing_data_table(df):
     missing_data = pd.concat([total, percent], axis=1, keys=['Total', 'Percent of NaNs'])
     return missing_data
 
-def preprocess(train, test, standardize=True):    
+def preprocess(train, test, standardize=True):  
+
+    # drop PSL as PS and PSL are highly correlated
+    train = train.drop(columns=['PSL'])
+    test = test.drop(columns=['PSL'])  
     # drop duplicates
     train.drop_duplicates(inplace=True)
+
+    num_clusters = 6  # Example number, adjust based on your dataset and domain knowledge
+
+    # Apply K-means clustering to the training data
+    kmeans = KMeans(n_clusters=num_clusters, random_state=42)
+    train['cluster'] = kmeans.fit_predict(train[['lat', 'lon']])
+
+    # Initialize a list to keep all the scalers
+    scalers = []
+    # Normalize data within each cluster for the training set
+    for cluster in range(num_clusters):
+        # Initialize a scaler (standard or min-max based on 'standardize' flag)
+        scaler = StandardScaler() if standardize else MinMaxScaler()
+        
+        # Select features to be scaled, excluding 'lat', 'lon', and 'cluster'
+        features_to_scale = [col for col in train.columns if col not in ['lat', 'lon', 'cluster', 'Label']]
+
+        # Fit the scaler on the training data of this cluster
+        scaler.fit(train.loc[train['cluster'] == cluster, features_to_scale])
+        
+        # Apply the scaler to the training data of this cluster
+        train.loc[train['cluster'] == cluster, features_to_scale] = scaler.transform(
+            train.loc[train['cluster'] == cluster, features_to_scale])
+        
+        # Store the scaler for later use on the test set
+        scalers.append(scaler)
+
+    # Predict the cluster for the test data based on the trained K-means model
+    test['cluster'] = kmeans.predict(test[['lat', 'lon']])
+
+    # Normalize test data based on the cluster it belongs to and the corresponding scaler
+    for cluster, scaler in zip(range(num_clusters), scalers):
+        # Select test data in the current cluster
+        test_cluster_data = test[test['cluster'] == cluster]
+
+        # Scale features for the test data in this cluster using the corresponding scaler
+        test.loc[test['cluster'] == cluster, features_to_scale] = scaler.transform(
+            test_cluster_data[features_to_scale])
+
+    # Dropping 'cluster' column as it is no longer needed after scaling
+    train = train.drop(columns=['cluster'])
+    test = test.drop(columns=['cluster'])
+
 
     # Extract year, month, and day from the 'time' column
     train['year'] = train.index.year
@@ -59,45 +105,13 @@ def preprocess(train, test, standardize=True):
     train['day'] = train.index.day
     test['day'] = test.index.day
 
-    
     # Splitting the dataset into features (X) and target (y)
     X_train = train.drop(columns=['Label'])
     y_train = train['Label']
     X_test = test
 
-    if standardize:
-        scaler = StandardScaler()
-    else:
-        scaler = MinMaxScaler()
-
-    # set aside a matrix of temporal features
-    X_train_temporal = X_train[['year', 'month', 'day']]
-    X_test_temporal = X_test[['year', 'month', 'day']]
-    # drop the temporal features from X
-    X_train = X_train.drop(columns=['year', 'month', 'day'])
-    X_test = X_test.drop(columns=['year', 'month', 'day'])
-
-    # Fit scaler on training data and transform both train and test data
-    scaler.fit(X_train)  # Fit only on training data
-    X_train_normalized = pd.DataFrame(scaler.transform(X_train), columns=X_train.columns)
-    X_test_normalized = pd.DataFrame(scaler.transform(X_test), columns=X_test.columns)
-
-
-    X_train_temporal = X_train_temporal.reset_index(drop=True)
-    X_train_normalized = X_train_normalized.reset_index(drop=True)
-
-    # concatenate X_temporal and X_normalized to get X
-    X_train = pd.concat([X_train_temporal, X_train_normalized], axis=1)
-
-    X_test_temporal = X_test_temporal.reset_index(drop=True)
-    X_test_normalized = X_test_normalized.reset_index(drop=True)
-
-    # concatenate X_temporal and X_normalized to get X
-    X_test = pd.concat([X_test_temporal, X_test_normalized], axis=1)
-
-
     # Squaring the features in X_normalized
-    for col in X_train_normalized.columns:
+    for col in X_train.drop(['year', 'month', 'day'],axis=1).columns:
         X_train[col + '_squared'] = X_train[col] ** 2
 
     # Transforming month and day into cyclical features
@@ -111,7 +125,7 @@ def preprocess(train, test, standardize=True):
     # X = X.drop(columns=['month', 'day'])
 
     # Squaring the features in X_normalized
-    for col in X_test_normalized.columns:
+    for col in X_test.drop(['year', 'month', 'day'],axis=1).columns:
         X_test[col + '_squared'] = X_test[col] ** 2
 
     # Transforming month and day into cyclical features
@@ -124,6 +138,7 @@ def preprocess(train, test, standardize=True):
     X_test = X_test.drop(columns=['month', 'day', 'year'])
     # X = X.drop(columns=['month', 'day'])
 
+    
     return X_train, y_train, X_test
 
 

@@ -1,8 +1,15 @@
 import numpy as np
 import wandb
 from sklearn.metrics import f1_score, classification_report
+from sklearn.linear_model import LogisticRegression
+from sklearn.svm import SVC
+from sklearn.naive_bayes import GaussianNB
+from sklearn.ensemble import RandomForestClassifier, VotingClassifier
+from sklearn.base import BaseEstimator, ClassifierMixin
+from xgboost import XGBClassifier
+import matplotlib.pyplot as plt
 
-class LogisticRegression:
+class CustomLogisticRegression(BaseEstimator, ClassifierMixin):
     def __init__(self, 
                 learning_rate=0.001, 
                 num_epochs=1000, 
@@ -98,7 +105,7 @@ class LogisticRegression:
             self.weights -= self.learning_rate * gradient_w
             self.bias -= self.learning_rate * gradient_b
 
-            if epoch % 100 == 0:
+            if epoch % 5 == 0:
                 train_loss = self.compute_loss(y, probs)
                 train_accuracy = np.mean(y == self.predict(X))
                 val_accuracy = np.mean(y_val == self.predict(X_val)) if self.validation else None
@@ -145,18 +152,57 @@ class LogisticRegression:
         output = np.argmax(probs, axis=1)
         return output
         
-    def get_params(self, deep=True):
-        return {
-            "learning_rate": self.learning_rate,
-            "num_epochs": self.num_epochs,
-            "regularization": self.regularization,
-            "lambda_reg": self.lambda_reg,
-            "gamma": self.gamma,
-            "alpha": self.alpha,
-            "class_weights": self.class_weights
-        }
-    
-    def set_params(self, **parameters):
-        for parameter, value in parameters.items():
-            setattr(self, parameter, value)
+
+class CustomVotingClassifier(BaseEstimator, ClassifierMixin):
+    def __init__(self):
+        self.random_forest = RandomForestClassifier(bootstrap = True, 
+                                                    class_weight =None, 
+                                                    criterion = 'gini',
+                                                    max_depth = 39,
+                                                    max_features = 3, 
+                                                    min_samples_leaf = 0.011565806463177194,
+                                                    min_samples_split = 0.017239740311285764, 
+                                                    n_estimators = 811
+                                                    )
+        self.xgboost = XGBClassifier(
+                                    colsample_bytree = 0.8586708932816216,
+                                    gamma = 0.08069966441012001,
+                                    learning_rate = 0.023581340214976668,
+                                    max_depth = 4,
+                                    min_child_weight = 0, 
+                                    n_estimators = 134, 
+                                    reg_alpha = 0.7516397085943209,
+                                    reg_lambda = 2.8905695685740858, 
+                                    scale_pos_weight = 6.989410350528603, 
+                                    subsample = 0.6379855073672654
+                                )
+
+        # Create a list of tuples with classifier name and classifier object
+        self.classifiers = [
+            ('random_forest', self.random_forest),
+            ('xgboost', self.xgboost)
+        ]
+
+        # Initialize VotingClassifier with soft voting
+        self.voting_classifier = VotingClassifier(estimators=self.classifiers, voting='soft')
+
+    def fit(self, X_train, y_train):
+        # Fit the voting classifier
+        self.voting_classifier.fit(X_train, y_train)
         return self
+
+    def predict(self, X):
+        # Make predictions
+        return self.voting_classifier.predict(X)
+
+    def predict_proba(self, X):
+        # Get prediction probabilities
+        return self.voting_classifier.predict_proba(X)
+
+    def get_individual_predictions(self, X):
+        # Get predictions from individual classifiers
+        individual_predictions = {}
+        for name, clf in self.classifiers:
+            clf.fit(X_train, y_train)  # Fit individual classifier
+            individual_predictions[name] = clf.predict_proba(X)
+        return individual_predictions
