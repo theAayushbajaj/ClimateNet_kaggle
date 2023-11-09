@@ -46,7 +46,58 @@ def draw_missing_data_table(df):
     missing_data = pd.concat([total, percent], axis=1, keys=['Total', 'Percent of NaNs'])
     return missing_data
 
-def preprocess(train, test, standardize=True):  
+def preprocess(data, train, standardize=True):
+    data = data.drop('PSL',axis=1)  # removing as the column values are almost the same with PS
+    #data['lon'] = (data['lon'] + 180) % 360 - 180
+    if train:
+        # drop duplicates
+        data.drop_duplicates(inplace=True)
+
+    # Extract year, month, and day from the 'time' column
+    data['year'] = data.index.year
+    data['month'] = data.index.month
+    data['day'] = data.index.day
+
+    if train:
+        # Splitting the dataset into features (X) and target (y)
+        X = data.drop(columns=['Label'])  # Assuming 'Label' is your target column
+        y = data['Label']
+    else:
+        X = data
+        y = None
+
+    # Separate columns to avoid standardization
+    X_region = X['region']
+    X_lat_lon = X[['lat', 'lon']]
+    X_temporal = X[['year', 'month', 'day']]
+    X = X.drop(columns=['lat', 'lon', 'year', 'month', 'day'])
+    
+    scaler = StandardScaler() if standardize else MinMaxScaler()
+    X_normalized = X.groupby('region').transform(lambda x: scaler.fit_transform(x.values[:,np.newaxis]).ravel())
+    
+    # Combining back the non-standardized columns
+    X_region = X_region.reset_index(drop=True)
+    X_lat_lon = X_lat_lon.reset_index(drop=True)
+    X_temporal = X_temporal.reset_index(drop=True)
+    X_normalized = X_normalized.reset_index(drop=True)
+
+    X = pd.concat([X_temporal, X_normalized], axis=1)
+
+    # Transforming month and day into cyclical features
+    X['sin_month'] = np.sin(2 * np.pi * X['month'] / 12)
+    X['cos_month'] = np.cos(2 * np.pi * X['month'] / 12)
+    X['sin_day'] = np.sin(2 * np.pi * X['day'] / 30)
+    X['cos_day'] = np.cos(2 * np.pi * X['day'] / 30)
+
+    # Dropping the original month and day columns
+    X = X.drop(columns=['month', 'day', 'year'])
+
+    if train:
+        return X, y
+    else:
+        return X
+    
+def preprocess_xgb(train, test, standardize=True):  
 
     # drop PSL as PS and PSL are highly correlated
     train = train.drop(columns=['PSL'])
@@ -138,7 +189,7 @@ def preprocess(train, test, standardize=True):
     X_test = X_test.drop(columns=['month', 'day', 'year'])
     # X = X.drop(columns=['month', 'day'])
 
-    
+
     return X_train, y_train, X_test
 
 

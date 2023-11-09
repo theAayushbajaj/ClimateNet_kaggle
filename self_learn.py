@@ -18,7 +18,7 @@ class CustomLogisticRegression(BaseEstimator, ClassifierMixin):
                 gamma=2.0, 
                 alpha=None,
                 class_weights=None,
-                validation=True,
+                validation=False,
                 logging_notes=" ",
                 logging_tag=" ",
                 verbose=0):
@@ -119,7 +119,7 @@ class CustomLogisticRegression(BaseEstimator, ClassifierMixin):
                         "val_accuracy": val_accuracy
                     })
                 
-                print(f"Epoch {epoch}, Loss: {train_loss}, Train Accuracy: {train_accuracy}, Val Accuracy: {val_accuracy}")
+                    print(f"Epoch {epoch}, Loss: {train_loss}, Train Accuracy: {train_accuracy}, Val Accuracy: {val_accuracy}")
         
         if self.verbose:
             wandb.summary["cross_val_score"] = val_accuracy
